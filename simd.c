@@ -44,7 +44,7 @@ void dump( __m256i reg, char * msg ) {
   printf("\n");
 }
 
-static inline __m256i expand(__m256i word0, __m256i word1,  __m256i *out1, __m256i *out2 ) {
+static inline __m256i expand(__m256i *in0, __m256i *in1,  __m256i *out1, __m256i *out2 ) {
 
   __m256i m0 = _mm256_set_epi8(85, 84, 81, 80, 69, 68, 65, 64, 21, 20, 17,
 		       16, 5, 4, 1, 0, 85, 84, 81, 80, 69, 68, 65,
@@ -54,6 +54,8 @@ static inline __m256i expand(__m256i word0, __m256i word1,  __m256i *out1, __m25
 
   __m256i nybble_mask = _mm256_set1_epi8(0x0F);
 
+  __m256i word0 = _mm256_loadu_si256(in0);
+  __m256i word1 = _mm256_loadu_si256(in1);
   
   __m256i even0 = _mm256_and_si256( word0, nybble_mask);  // 1 / .33 ?
   __m256i odd0  = _mm256_and_si256( _mm256_srli_epi64( word0, 4), nybble_mask);
@@ -79,8 +81,11 @@ static inline __m256i expand(__m256i word0, __m256i word1,  __m256i *out1, __m25
   __m256i his = _mm256_unpackhi_epi8( even, odd );
 
   // 128i interleave
-  *out1 = _mm256_permute2x128_si256( los, his, 0x20);  // 3 / 1 
-  *out2 = _mm256_permute2x128_si256( los, his, 0x31);
+  __m256i out1i = _mm256_permute2x128_si256( los, his, 0x20);  // 3 / 1 
+  __m256i out2i = _mm256_permute2x128_si256( los, his, 0x31);
+  // store
+  _mm256_storeu_si256((__m256i *)out1, out1i);    
+  _mm256_storeu_si256((__m256i *)out2, out2i);    
 }
 
 int main() {
@@ -97,17 +102,13 @@ int main() {
   
   uint64_t  *out;
   out = malloc(N*sizeof(uint64_t));
-  __m256i out1i, out2i;
 
   RDTSC_START(start);
 
   for(int i = 0; i < N; i+=8) {
 
-    __m256i x0 = _mm256_loadu_si256(in0+i);
-    __m256i x1 = _mm256_loadu_si256(in1+i);
-    expand( x1, x0, &out1i, &out2i );
-    _mm256_storeu_si256((__m256i *)(out+i), out1i);    
-    _mm256_storeu_si256((__m256i *)(out+i+4), out2i);    
+    expand((__m256i *) (in0+i), (__m256i *) (in1+i), (__m256i *)(out+i), (__m256i *)(out+i+4));
+
   }
 
   RDTSC_STOP(end);
