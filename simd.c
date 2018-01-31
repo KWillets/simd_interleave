@@ -44,6 +44,8 @@ void dump( __m256i reg, char * msg ) {
   printf("\n");
 }
 
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__ICC)
+
 static inline void
 __attribute__((__always_inline__))
 _mm256_storeu2_m128i(__m128i* const hiaddr, __m128i* const loaddr, const __m256i a)
@@ -51,6 +53,7 @@ _mm256_storeu2_m128i(__m128i* const hiaddr, __m128i* const loaddr, const __m256i
   _mm_storeu_si128(loaddr, _mm256_castsi256_si128(a));
   _mm_storeu_si128(hiaddr, _mm256_extracti128_si256(a, 1));
 }
+#endif
 
 static inline __m256i expand(uint32_t *in0, uint32_t *in1,  uint64_t *out ) {
 
