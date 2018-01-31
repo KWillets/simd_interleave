@@ -5,6 +5,36 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define RDTSC_START(cycles)                                             \
+  do {                                                                \
+    uint32_t cyc_high, cyc_low;                                     \
+    __asm volatile("cpuid\n"                                        \
+		                          "rdtsc\n"                                        \
+		                          "mov %%edx, %0\n"                                \
+		   "mov %%eax, %1" :                                \
+		   "=r" (cyc_high),                                 \
+		   "=r"(cyc_low) :                                  \
+		   : /* no read only */                             \
+		   "%rax", "%rbx", "%rcx", "%rdx" /* clobbers */    \
+		   );                                               \
+    (cycles) = ((uint64_t)cyc_high << 32) | cyc_low;                \
+  } while (0)
+
+#define RDTSC_STOP(cycles)                                              \
+  do {                                                                \
+    uint32_t cyc_high, cyc_low;                                     \
+    __asm volatile("rdtscp\n"                                       \
+		                          "mov %%edx, %0\n"                                \
+		                          "mov %%eax, %1\n"                                \
+		   "cpuid" :                                        \
+		   "=r"(cyc_high),                                  \
+		   "=r"(cyc_low) :                                  \
+		   /* no read only registers */ :                   \
+		   "%rax", "%rbx", "%rcx", "%rdx" /* clobbers */    \
+		   );                                               \
+    (cycles) = ((uint64_t)cyc_high << 32) | cyc_low;                \
+  } while (0)
+
 void dump( __m256i reg, char * msg ) {
   printf("%s ", msg);
   unsigned char c[32];
@@ -13,25 +43,23 @@ void dump( __m256i reg, char * msg ) {
     printf("%02hhX ", c[i] );
   printf("\n");
 }
-	  
+
 static inline __m256i expand(__m256i word0, __m256i word1,  __m256i *out1, __m256i *out2 ) {
 
-  const __m256i m0 = _mm256_set_epi8(85, 84, 81, 80, 69, 68, 65, 64, 21, 20, 17,
-				    16, 5, 4, 1, 0, 85, 84, 81, 80, 69, 68, 65,
-				    64, 21, 20, 17, 16, 5, 4, 1, 0);
+  __m256i m0 = _mm256_set_epi8(85, 84, 81, 80, 69, 68, 65, 64, 21, 20, 17,
+		       16, 5, 4, 1, 0, 85, 84, 81, 80, 69, 68, 65,
+		       64, 21, 20, 17, 16, 5, 4, 1, 0);
 
-  const __m256i m1 = _mm256_slli_epi64( m0, 1);
+  __m256i m1 = _mm256_slli_epi64( m0, 1);
 
-  const __m256i nybble_mask = _mm256_set1_epi8(0x0F);
+  __m256i nybble_mask = _mm256_set1_epi8(0x0F);
 
-  dump( m0, "m0   ");
-  dump( m1, "m1   ");
+  
   __m256i even0 = _mm256_and_si256( word0, nybble_mask);  // 1 / .33 ?
   __m256i odd0  = _mm256_and_si256( _mm256_srli_epi64( word0, 4), nybble_mask);
 
   __m256i even1 = _mm256_and_si256( word1, nybble_mask);
   __m256i odd1  = _mm256_and_si256( _mm256_srli_epi64( word1, 4), nybble_mask);
-  dump( even1, "even1");
   
   // lookup
     
@@ -40,7 +68,6 @@ static inline __m256i expand(__m256i word0, __m256i word1,  __m256i *out1, __m25
   
   even1 = _mm256_shuffle_epi8( m1, even1 );  
   odd1  = _mm256_shuffle_epi8( m1, odd1  );
-  dump( even1, "even1");
 
   // combine
   
@@ -54,28 +81,45 @@ static inline __m256i expand(__m256i word0, __m256i word1,  __m256i *out1, __m25
   // 128i interleave
   *out1 = _mm256_permute2x128_si256( los, his, 0x20);  // 3 / 1 
   *out2 = _mm256_permute2x128_si256( los, his, 0x31);
-
-  dump(*out1, "lo");
-  dump(*out2, "hi");
 }
 
 int main() {
+  uint64_t start,end;
   uint32_t *in0, *in1;
-  in0 = malloc(32);  in1 = malloc(32);
-  for(int i= 0; i < 8; i++) {
+
+#define N 1024
+  
+  in0 = malloc(N*sizeof(uint32_t));  in1 = malloc(N*sizeof(uint32_t));
+  for(uint32_t i= 0; i < N; i++) {
     in0[i] = i;
     in1[i] = 0;
   }
   
-  uint32_t out1[8], out2[8];
-  __m256i x0 = _mm256_loadu_si256(in0);
-  __m256i x1 = _mm256_loadu_si256(in1);
+  uint64_t  *out;
+  out = malloc(N*sizeof(uint64_t));
   __m256i out1i, out2i;
 
-  //_mm256_lddqu_si256
-  expand( x1, x0, &out1i, &out2i );
-  _mm256_storeu_si256( out1, out1i );
+  RDTSC_START(start);
+
+  for(int i = 0; i < N; i+=8) {
+
+    __m256i x0 = _mm256_loadu_si256(in0+i);
+    __m256i x1 = _mm256_loadu_si256(in1+i);
+    expand( x1, x0, &out1i, &out2i );
+    _mm256_storeu_si256((__m256i *)(out+i), out1i);    
+    _mm256_storeu_si256((__m256i *)(out+i+4), out2i);    
+  }
+
+  RDTSC_STOP(end);
+
+  printf("N=%d\ncycles = %d\nper int=%f\n",N, end-start, (end-start)/(N*2.0));
+
+  int sum=0;
+  for(int i=0; i < 2*N; i++)
+    sum += out[i];
+
+  printf("sum %d\n", sum);
   
   for(int i = 0; i < 8; i++ )
-    printf("%d ", out1[i]);
+    printf("%d ", out[i]);
 }
