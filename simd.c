@@ -38,7 +38,7 @@
 void dump( __m256i reg, char * msg ) {
   printf("%s ", msg);
   unsigned char c[32];
-  _mm256_storeu_si256(c, reg);
+  _mm256_storeu_si256((__m256i *)c, reg);
   for( int i = 31; i >=0; i-- )
     printf("%02hhX ", c[i] );
   printf("\n");
@@ -46,6 +46,7 @@ void dump( __m256i reg, char * msg ) {
 
 #if defined(__GNUC__) && !defined(__clang__) && !defined(__ICC)
 
+// this maps to multiple instructions in avx, but one in avx2 (?)
 static inline void
 __attribute__((__always_inline__))
 _mm256_storeu2_m128i(__m128i* const hiaddr, __m128i* const loaddr, const __m256i a)
@@ -55,8 +56,9 @@ _mm256_storeu2_m128i(__m128i* const hiaddr, __m128i* const loaddr, const __m256i
 }
 #endif
 
-static inline __m256i expand(uint32_t *in0, uint32_t *in1,  uint64_t *out ) {
+static inline void morton_vec8(uint32_t *in0, uint32_t *in1,  uint64_t *out ) {
 
+  // nybble -> byte lookups
   __m256i m0 = _mm256_set_epi8(85, 84, 81, 80, 69, 68, 65, 64, 21, 20, 17,
 		       16, 5, 4, 1, 0, 85, 84, 81, 80, 69, 68, 65,
 		       64, 21, 20, 17, 16, 5, 4, 1, 0);
@@ -91,13 +93,6 @@ static inline __m256i expand(uint32_t *in0, uint32_t *in1,  uint64_t *out ) {
   __m256i los = _mm256_unpacklo_epi8( even, odd );  // 1 / 1
   __m256i his = _mm256_unpackhi_epi8( even, odd );
 
-  // 128i interleave
-  //__m256i out1i = _mm256_permute2x128_si256( los, his, 0x20);  // 3 / 1 
-  //__m256i out2i = _mm256_permute2x128_si256( los, his, 0x31);
-  // store
-  //_mm256_storeu_si256((__m256i *)out1, out1i);
-  //_mm256_storeu_si256((__m256i *)out2, out2i);
-
   // AC,BD => AB,CD
   // interleaved 128i stores to 8 x uint64_t
   _mm256_storeu2_m128i ((__m128i*) (out+4),(__m128i*) out, los);
@@ -121,22 +116,24 @@ int main() {
 
   RDTSC_START(start);
 
-  for(int i = 0; i < N; i+=8) {
-
-    expand(in0+i, in1+i, out+i);
-
-  }
+  for(int i = 0; i < N; i+=8) 
+    morton_vec8(in0+i, in1+i, out+i);
 
   RDTSC_STOP(end);
 
-  printf("N=%d\ncycles = %d\nper int=%f\n",N, end-start, (end-start)/(N*2.0));
+  printf("N=%d\ncycles = %ld\nper int=%f\n",N, end-start, (end-start)/(N*2.0));
 
-  int sum=0;
-  for(int i=0; i < 2*N; i++)
+  // prevent optimizing out
+  uint64_t sum=0;
+  for(int i=0; i < N; i++)
     sum += out[i];
 
-  printf("sum %d\n", sum);
+  printf("sum %ld\n", sum);
   
   for(int i = 0; i < 8; i++ )
-    printf("%d ", out[i]);
+    printf("%ld ", out[i]);
+
+  printf("last (%d, %d) => %ld\n", in0[N-1], in1[N-1], out[N-1]);
+
+  printf("\n\n");
 }
