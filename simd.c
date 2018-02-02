@@ -108,7 +108,7 @@ int main() {
   in0 = malloc(N*sizeof(uint32_t));  in1 = malloc(N*sizeof(uint32_t));
   for(uint32_t i= 0; i < N; i++) {
     in0[i] = i;
-    in1[i] = 0;
+    in1[i] = i;
   }
   
   uint64_t  *out;
@@ -133,7 +133,7 @@ int main() {
   for(int i = 0; i < 8; i++ )
     printf("%ld ", out[i]);
 
-  printf("last (%d, %d) => %ld\n", in0[N-1], in1[N-1], out[N-1]);
+  printf("\nlast (%d, %d) => %ld\n", in0[N-1], in1[N-1], out[N-1]);
 
   printf("\n\n");
 }
